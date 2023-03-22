@@ -4,7 +4,7 @@ import argparse
 import sys
 from itertools import zip_longest
 from os import environ
-from typing import Generator, Union
+from typing import Generator
 
 import openai
 from openai.error import Timeout
@@ -17,8 +17,7 @@ def main(api_key: str, model: str, query_words: list, chat_timeout: int):
     if len(query_words) > 0:
         query = " ".join(query_words)
 
-    chat = start_chat_api(model, timeout=chat_timeout)
-    next(chat)  # kick-start generator
+    chat = ChatGPT(model=model, timeout=chat_timeout)
 
     try:
         cli(chat, query=query)
@@ -26,67 +25,54 @@ def main(api_key: str, model: str, query_words: list, chat_timeout: int):
         print("\nThanks, see you again!")
 
 
-ChatResponse = Union[str, None, Timeout]
+class ChatGPT:
+    def __init__(self, model: str, timeout: int):
+        self._model = model
+        self._timeout = timeout
+        self._queries: list[str] = []
+        self._replies: list[str] = []
+
+    def ask(self, query: str) -> Generator[str, None, None]:
+        self._queries.append(query)
+
+        chat = openai.ChatCompletion.create(
+            model=self._model,
+            messages=_make_messages(self._queries, self._replies),
+            stream=True,
+            request_timeout=self._timeout,
+        )
+
+        reply = ""
+        for msg_fragment in chat:
+            delta = msg_fragment.choices[0].delta
+            if "content" not in delta or delta.content == "\n\n":
+                continue
+
+            yield delta.content
+            reply += delta.content
+        self._replies.append(reply)
 
 
-def cli(chat: Generator[ChatResponse, str, None], query: str | None):
+def cli(chat: ChatGPT, query: str | None):
     if query is None:
         query = input("Ask away!\nYou: ")
     else:
         sys.stdout.write(f"You: {query}\n\n")
 
-    chat.send(query)
-
-    sys.stdout.write("GPT: ")
-    for msg_fragment in chat:
-        is_timeout = isinstance(msg_fragment, Timeout)
-        if msg_fragment is None or is_timeout:
-            if is_timeout:
-                sys.stdout.write("That took too long. Please try again.")
-                next(chat)
-
-            query = input("\n\nYou: ")
-            chat.send(query)
-            sys.stdout.write("GPT: ")
-
-        if isinstance(msg_fragment, str):
-            sys.stdout.write(msg_fragment)
-
-
-def start_chat_api(model: str, timeout: int) -> Generator[ChatResponse, str, None]:
-    queries: list[str] = []
-    replies: list[str] = []
-
-    query: str = yield None
     while True:
-        yield None  # let caller throw away value returned in .send()
-        queries.append(query)
+        sys.stdout.write("GPT: ")
 
-        reply = ""
-
+        message_fragments: Generator[str, None, None] | None = None
         try:
-            chat = openai.ChatCompletion.create(
-                model=model,
-                messages=_make_messages(queries, replies),
-                stream=True,
-                request_timeout=timeout,
-            )
+            message_fragments = chat.ask(query)
+        except Timeout:
+            sys.stdout.write("That took too long. Please try again.")
 
-            for msg in chat:
-                delta = msg.choices[0].delta
-                if "content" not in delta or delta.content == "\n\n":
-                    continue
+        if message_fragments:
+            for message_fragment in message_fragments:
+                sys.stdout.write(message_fragment)
 
-                yield delta.content
-                reply += delta.content
-        except Timeout as err:
-            yield err
-
-        # tell caller the current response has ended, and wait for new query
-        query = yield None
-
-        replies.append(reply)
-        reply = ""
+        query = input("\n\nYou: ")
 
 
 def _make_messages(queries: list[str], replies: list[str]) -> list[dict]:
