@@ -89,7 +89,7 @@ def _make_messages(queries: list[str], replies: list[str]) -> list[dict]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("query", nargs="*", default=[])
-    parser.add_argument("--model", default="gpt-3.5-turbo")
+    parser.add_argument("--model", default=environ.get("OPENAI_MODEL", "gpt-3.5-turbo"))
     parser.add_argument("--api-key", default=environ.get("OPENAI_API_KEY"))
     parser.add_argument("--chat-timeout", default=10)
     return parser.parse_args()
