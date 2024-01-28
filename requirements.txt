@@ -1,1 +1,2 @@
-openai==0.27.2
+openai==1.10.0
+termcolor==2.4.0

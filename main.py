@@ -6,18 +6,15 @@ from itertools import zip_longest
 from os import environ
 from typing import Generator
 
-import openai
-from openai.error import Timeout
+from openai import OpenAI, APITimeoutError
 
 
-def main(api_key: str, model: str, query_words: list, chat_timeout: int):
-    openai.api_key = api_key
-
+def main(api_key: str, model: str, query_words: list,):
     query: str | None = None
     if len(query_words) > 0:
         query = " ".join(query_words)
 
-    chat = ChatGPT(model=model, timeout=chat_timeout)
+    chat = ChatGPT(api_key=api_key, model=model)
 
     try:
         cli(chat, query=query)
@@ -26,30 +23,29 @@ def main(api_key: str, model: str, query_words: list, chat_timeout: int):
 
 
 class ChatGPT:
-    def __init__(self, model: str, timeout: int):
+    def __init__(self, api_key: str, model: str):
         self._model = model
-        self._timeout = timeout
         self._queries: list[str] = []
         self._replies: list[str] = []
+        self._client = OpenAI(api_key=api_key)
 
     def ask(self, query: str) -> Generator[str, None, None]:
         self._queries.append(query)
 
-        chat = openai.ChatCompletion.create(
+        stream = self._client.chat.completions.create(
             model=self._model,
             messages=_make_messages(self._queries, self._replies),
             stream=True,
-            request_timeout=self._timeout,
         )
 
         reply = ""
-        for msg_fragment in chat:
-            delta = msg_fragment.choices[0].delta
-            if "content" not in delta or delta.content == "\n\n":
+        for chunk in stream:
+            delta = chunk.choices[0].delta.content
+            if delta is None:
                 continue
 
-            yield delta.content
-            reply += delta.content
+            yield delta
+            reply += delta
         self._replies.append(reply)
 
 
@@ -60,12 +56,12 @@ def cli(chat: ChatGPT, query: str | None):
         sys.stdout.write(f"You: {query}\n\n")
 
     while True:
-        sys.stdout.write("GPT: ")
+        sys.stdout.write("\nGPT: ")
 
         message_fragments: Generator[str, None, None] | None = None
         try:
             message_fragments = chat.ask(query)
-        except Timeout:
+        except APITimeoutError:
             sys.stdout.write("That took too long. Please try again.")
 
         if message_fragments:
@@ -89,9 +85,8 @@ def _make_messages(queries: list[str], replies: list[str]) -> list[dict]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("query", nargs="*", default=[])
-    parser.add_argument("--model", default=environ.get("OPENAI_MODEL", "gpt-3.5-turbo"))
+    parser.add_argument("--model", default=environ.get("OPENAI_MODEL", "gpt-4-0125-preview"))
     parser.add_argument("--api-key", default=environ.get("OPENAI_API_KEY"))
-    parser.add_argument("--chat-timeout", default=10)
     return parser.parse_args()
 
 
@@ -102,5 +97,4 @@ if __name__ == "__main__":
         api_key=args.api_key,
         model=args.model,
         query_words=args.query,
-        chat_timeout=args.chat_timeout,
     )
