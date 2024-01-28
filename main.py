@@ -7,7 +7,7 @@ from os import environ
 from typing import Generator
 
 from openai import OpenAI, APITimeoutError
-
+from termcolor import colored
 
 def main(api_key: str, model: str, query_words: list,):
     query: str | None = None
@@ -56,17 +56,17 @@ def cli(chat: ChatGPT, query: str | None):
         sys.stdout.write(f"You: {query}\n\n")
 
     while True:
-        sys.stdout.write("\nGPT: ")
+        sys.stdout.write(colored("\nGPT: ", "light_cyan"))
 
         message_fragments: Generator[str, None, None] | None = None
         try:
             message_fragments = chat.ask(query)
         except APITimeoutError:
-            sys.stdout.write("That took too long. Please try again.")
+            sys.stdout.write(colored("That took too long. Please try again.", "red"))
 
         if message_fragments:
             for message_fragment in message_fragments:
-                sys.stdout.write(message_fragment)
+                sys.stdout.write(colored(message_fragment, "light_cyan"))
 
         query = input("\n\nYou: ")
 
